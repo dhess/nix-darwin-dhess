@@ -45,7 +45,7 @@ let
     address = lib.optionalString (interface.address != []) "Address = ${addressList}";
     mtu = lib.optionalString (interface.mtu != null) "MTU = ${toString interface.mtu}";
     dnsList = lib.concatStringsSep ", " interface.dns;
-    dns = lib.optionalString (interface.dns != null) "DNS = ${dnsList}";
+    dns = lib.optionalString (interface.dns != []) "DNS = ${dnsList}";
     peers = lib.concatStringsSep "\n" (lib.mapAttrsToList (_: peer: generatePeer peer) interface.peers);
     preUpScript = pkgs.writeShellScriptBin "wireguard-${interface.name}-preup" interface.preUp;
     preUp = lib.optionalString (interface.preUp != null) "PreUp = ${preUpScript}/bin/wireguard-${interface.name}-preup";
