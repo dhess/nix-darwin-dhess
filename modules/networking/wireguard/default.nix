@@ -86,7 +86,7 @@ let
     configDir = mkConfigFile configFileName interface;
     configFile = "${configDir}/${configFileName}";
   in
-    lib.nameValuePair "wireguard-${name}" ({
+    lib.nameValuePair "wireguard-${name}" {
       script = ''
         _down() { 
           echo "Stopping WireGuard interface ${name}" 
@@ -105,10 +105,9 @@ let
       serviceConfig.ProcessType = "Interactive";
       serviceConfig.StandardErrorPath = interface.logFile;
       serviceConfig.StandardOutPath = interface.logFile;
-    } // (if interface.autoStart then {
-      serviceConfig.KeepAlive = true;
-      serviceConfig.RunAtLoad = true;
-    } else {}));
+      serviceConfig.KeepAlive = interface.autoStart;
+      serviceConfig.RunAtLoad = interface.autoStart;
+    };
 
 
   # Create some convenience scripts for starting/stopping the launchd
