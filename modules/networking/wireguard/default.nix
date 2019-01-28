@@ -72,21 +72,21 @@ let
     ${peers}
   '';
 
-  mkConfigFile = name: values:
+  mkConfigFile = name: interface:
   let
-    interfaceConfig = generateInterfaceConfig values;
+    interfaceConfig = generateInterfaceConfig interface;
   in pkgs.writeTextDir name
   ''
     ${interfaceConfig}
   '';
 
-  generateDaemon = name: values:
+  generateDaemon = name: interface:
   let
     configFileName = "${name}.conf";
-    configDir = mkConfigFile configFileName values;
+    configDir = mkConfigFile configFileName interface;
     configFile = "${configDir}/${configFileName}";
   in
-    lib.nameValuePair "wireguard-${name}" {
+    lib.nameValuePair "wireguard-${name}" ({
       script = ''
         _down() { 
           echo "Stopping WireGuard interface ${name}" 
@@ -102,11 +102,13 @@ let
         while true; do sleep 60 ; done
       '';
 
-      serviceConfig.KeepAlive = false;
       serviceConfig.ProcessType = "Interactive";
-      serviceConfig.StandardErrorPath = values.logFile;
-      serviceConfig.StandardOutPath = values.logFile;
-    };
+      serviceConfig.StandardErrorPath = interface.logFile;
+      serviceConfig.StandardOutPath = interface.logFile;
+    } // (if interface.autoStart then {
+      serviceConfig.KeepAlive = true;
+      serviceConfig.RunAtLoad = true;
+    } else {}));
 
 
   # Create some convenience scripts for starting/stopping the launchd

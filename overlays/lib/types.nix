@@ -215,6 +215,17 @@ rec
         '';
       };
 
+      autoStart = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          If true, <literal>launchd</literal> will start this
+          WireGuard interface automatically (i.e., it will be started
+          at boot time), and keep it alive unless explicitly stopped
+          by the user.
+        '';
+      };
+
       logFile = lib.mkOption {
         type = lib.types.path;
         default = "/var/log/wireguard-${name}.log";
