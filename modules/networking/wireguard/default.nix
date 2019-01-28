@@ -4,6 +4,7 @@ let
 
   cfg = config.networking.wireguard;
 
+  controlPerms = if cfg.rootOnly then "0755" else "0777";
 
   # wg-quick exports a path to a file whose contents reveal "real"
   # interface name. We need this in order to set properties on the
@@ -97,45 +98,84 @@ let
 
         echo "Starting WireGuard interface ${name}";
         ${pkgs.wireguard-tools}/bin/wg-quick up ${configFile}
-
-        # Wait around for launchd to stop the service via SIGTERM.
-        while true; do sleep 60 ; done
+        while [ -f /var/run/wireguard/control/${name}.up ] ; do sleep 1 ; done
+        _down
       '';
 
       serviceConfig.ProcessType = "Interactive";
       serviceConfig.StandardErrorPath = interface.logFile;
       serviceConfig.StandardOutPath = interface.logFile;
-      serviceConfig.KeepAlive = interface.autoStart;
       serviceConfig.RunAtLoad = interface.autoStart;
+
+      # Note: PathState doesn't work as it's explained in the
+      # launchd.plist man page, which implies that the job will be
+      # stopped when the path no longer exists. launchd will *start*
+      # the job upon creation of the path, but not the converse.
+      # Therefore, in the launchd script, we watch for the path to go
+      # away and then bring down the interface ourselves.
+
+      serviceConfig.KeepAlive = if interface.autoStart then true else {
+        PathState = { "/var/run/wireguard/control/${name}.up" = true; };
+      };
     };
 
+  controlScript = name:
+  let
+    daemonName = config.launchd.daemons."wireguard-${name}".serviceConfig.Label;
+  in pkgs.writeShellScriptBin "wg-${name}" ''
+    function usage {
+        echo "usage: `basename $0` up|down" >&2
+        exit 1
+    }
+    [[ $# == 1 ]] || usage
+    control_file="/var/run/wireguard/control/${name}.up"
+    case "$1" in
+      up   ) touch $control_file || echo "Can't bring up ${name}; try running as root." && exit 1;;
+      down ) rm -f $control_file || echo "Can't bring down ${name}; try running as root." && exit 1;;
+      *    ) usage
+    esac
+  '';
 
-  # Create some convenience scripts for starting/stopping the launchd
-  # services.
-  startScript = name:
-  let
-    daemonName = config.launchd.daemons."wireguard-${name}".serviceConfig.Label;
-  in pkgs.writeShellScriptBin "wg-start-${name}" ''
-    launchctl start ${daemonName}
-  '';
-  stopScript = name:
-  let
-    daemonName = config.launchd.daemons."wireguard-${name}".serviceConfig.Label;
-  in pkgs.writeShellScriptBin "wg-stop-${name}" ''
-    launchctl stop ${daemonName}
-  '';
   convenienceScripts = pkgs.symlinkJoin {
     name = "wireguard-convenience-scripts";
-    paths = (lib.mapAttrsToList (_: config: startScript config.name) cfg.interfaces) ++
-            (lib.mapAttrsToList (_: config: stopScript config.name) cfg.interfaces);
+    paths = lib.mapAttrsToList (_: config: controlScript config.name) cfg.interfaces;
   };
 
 in
 {
   options.networking.wireguard = {
+    rootOnly = lib.mkEnableOption ''
+      If false (the default), any user can start and stop any
+      WireGuard interface. Otherwise, only root can do so.
+    '';
+
     interfaces = lib.mkOption {
       type = lib.types.attrsOf pkgs.lib.types.wireguard.interface;
-      description = "WireGuard interfaces.";
+      description = ''
+        Zero or more declarative WireGuard interfaces. The attribute
+        name of each interface declaration should be a valid WireGuard
+        interface name.
+
+        Unless they are configured to auto-start (see below),
+        interfaces defined here are started and stopped using a script
+        named <literal>wg-<emphasis>name</emphasis></literal>, where
+        <literal><emphasis>name</emphasis></literal> is the attribute
+        name for the given interface. Use <literal>wg-name
+        up</literal> to bring the interface up, or <literal>wg-name
+        down</literal> to bring it down.
+
+        Interfaces configured to auto-start will run automatically,
+        i.e., at boot, or as soon as the nix-darwin configuration is
+        activated. These can only be deactivated by removing them from
+        the nix-darwin configuration and making the new configuration
+        active, or by unloading them using launchd directly like so:
+        <literal>launchd unload
+        org.nixos.wireguard-<emphasis>interface-name</emphasis></literal>.
+
+        Note that WireGuard secrets such as interface private keys and
+        pre-shared keys are never stored in the Nix store. As such,
+        they must be provided out-of-band, and secured by the user.
+      '';
       default = {};
       example = {
         wg0 = {
@@ -158,5 +198,12 @@ in
     ];
 
     launchd.daemons = (lib.mapAttrs' generateDaemon cfg.interfaces);
+
+    system.activationScripts.postActivation.text = ''
+      if [ ! -d /var/run/wireguard ] ; then
+        install -d -o root -g daemon -m 0755 /var/run/wireguard
+      fi
+      install -d -o root -g daemon -m ${controlPerms} /var/run/wireguard/control
+    '';
   };
 }
