@@ -1,4 +1,4 @@
-# nix-darwin-dhess
+This repo has been retired. Please see
 
-My personal nix-darwin modules.
+https://github.com/dhess/dhess-nix-darwin
 
